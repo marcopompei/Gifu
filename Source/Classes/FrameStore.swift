@@ -46,9 +46,7 @@ class FrameStore {
   /// The index of the previous GIF frame.
   var previousFrameIndex = 0 {
     didSet {
-      preloadFrameQueue.async {
-        self.updatePreloadedFrames()
-      }
+      self.updatePreloadedFrames()
     }
   }
 
@@ -59,7 +57,7 @@ class FrameStore {
   var shouldResizeFrames = true
   
   /// Dispatch queue used for preloading images.
-  private lazy var preloadFrameQueue: DispatchQueue = {
+  fileprivate lazy var preloadFrameQueue: DispatchQueue = {
     return DispatchQueue(label: "co.kaishin.Gifu.preloadQueue")
   }()
 
@@ -96,10 +94,7 @@ class FrameStore {
   func prepareFrames(_ completionHandler: (() -> Void)? = nil) {
     frameCount = Int(CGImageSourceGetCount(imageSource))
     animatedFrames.reserveCapacity(frameCount)
-    preloadFrameQueue.async {
-      self.setupAnimatedFrames()
-      completionHandler?()
-    }
+    setupAnimatedFrames(completionHandler)
   }
 
   /// Returns the frame at a particular index.
@@ -166,13 +161,25 @@ private extension FrameStore {
   /// Updates the frames by preloading new ones and replacing the previous frame with a placeholder.
   func updatePreloadedFrames() {
     if !preloadingIsNeeded { return }
-    animatedFrames[previousFrameIndex] = animatedFrames[previousFrameIndex].placeholderFrame
 
-    preloadIndexes(withStartingIndex: currentFrameIndex).forEach { index in
-      let currentAnimatedFrame = animatedFrames[index]
-      if !currentAnimatedFrame.isPlaceholder { return }
-      animatedFrames[index] = currentAnimatedFrame.makeAnimatedFrame(with: loadFrame(at: index))
+    var animatedFrames = self.animatedFrames
+    let previousFrameIndex = self.previousFrameIndex
+    let currentFrameIndex = self.currentFrameIndex
+
+    preloadFrameQueue.async {
+      animatedFrames[previousFrameIndex] = animatedFrames[previousFrameIndex].placeholderFrame
+
+      self.preloadIndexes(withStartingIndex: currentFrameIndex).forEach { index in
+        let currentAnimatedFrame = animatedFrames[index]
+        if !currentAnimatedFrame.isPlaceholder { return }
+        animatedFrames[index] = currentAnimatedFrame.makeAnimatedFrame(with: self.loadFrame(at: index))
+      }
+
+      DispatchQueue.main.async {
+        self.animatedFrames = animatedFrames
+      }
     }
+
   }
 
   /// Increments the `timeSinceLastFrameChange` property with a given duration.
@@ -235,21 +242,28 @@ private extension FrameStore {
     }
   }
     
-  func setupAnimatedFrames() {
-      resetAnimatedFrames()
-        
+  func setupAnimatedFrames(_ completionHandler: (() -> Void)? = nil) {
+    resetAnimatedFrames()
+
+    var animatedFrames = self.animatedFrames
+
+    preloadFrameQueue.async {
       var duration: TimeInterval = 0
-        
-      (0..<frameCount).forEach { index in
-          let frameDuration = CGImageFrameDuration(with: imageSource, atIndex: index)
-          duration += min(frameDuration, maxTimeStep)
-          animatedFrames += [AnimatedFrame(image: nil, duration: frameDuration)]
-            
-          if index > bufferFrameCount { return }
-          animatedFrames[index] = animatedFrames[index].makeAnimatedFrame(with: loadFrame(at: index))
+
+      (0..<self.frameCount).forEach { index in
+        let frameDuration = CGImageFrameDuration(with: self.imageSource, atIndex: index)
+        duration += min(frameDuration, self.maxTimeStep)
+        animatedFrames += [AnimatedFrame(image: nil, duration: frameDuration)]
+
+        if index > self.bufferFrameCount { return }
+        animatedFrames[index] = animatedFrames[index].makeAnimatedFrame(with: self.loadFrame(at: index))
       }
-        
-      self.loopDuration = duration
+      DispatchQueue.main.async {
+        self.animatedFrames = animatedFrames
+        self.loopDuration = duration
+        completionHandler?()
+      }
+    }
   }
 
   /// Reset animated frames.
