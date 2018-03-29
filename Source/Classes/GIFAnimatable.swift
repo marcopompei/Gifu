@@ -187,8 +187,8 @@ extension GIFAnimatable {
 
   /// Updates the image with a new frame if necessary.
   public func updateImageIfNeeded() {
-    if var imageContainer = self as? ImageContainer {
-      imageContainer.image = activeFrame ?? imageContainer.image
+    if var imageContainer = self as? ImageContainer, let activeFrame = self.activeFrame {
+      imageContainer.image = activeFrame
     } else {
       layer.contents = activeFrame?.cgImage
     }
